@@ -7,7 +7,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 @Configuration
 public class WebClientConfig {
 
-    // Bean de WebClient para hacer peticiones HTTP a los microservicios
+    // Bean de WebClient para hacer peticiones HTTP para los microservicios
     @Bean
     public WebClient.Builder webClientBuilder() {
         return WebClient.builder();
