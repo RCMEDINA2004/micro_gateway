@@ -32,38 +32,43 @@ public class ProxyController {
     private final WebClient.Builder webClientBuilder;
 
     // ── AUTH: /api/auth/** → auth-service ──────────────────────────
+    // Gateway recibe /api/auth/login → envía /auth/login al auth-service
     @RequestMapping("/api/auth/**")
     public ResponseEntity<String> proxyAuth(HttpServletRequest request,
                                             @RequestBody(required = false) String body) {
-        return forward(request, body, authUrl, "/api/auth");
+        return forward(request, body, authUrl, "/api");
     }
 
     // ── PETS: /api/pets/** → pets-service ──────────────────────────
+    // Gateway recibe /api/pets/ → envía /pets/ al pets-service
     @RequestMapping("/api/pets/**")
     public ResponseEntity<String> proxyPets(HttpServletRequest request,
                                             @RequestBody(required = false) String body) {
-        return forward(request, body, petsUrl, "/api/pets");
+        return forward(request, body, petsUrl, "/api");
     }
 
     // ── APPOINTMENTS: /api/appointments/** → appointments-service ──
+    // Gateway recibe /api/appointments → envía /appointments al appointments-service
     @RequestMapping("/api/appointments/**")
     public ResponseEntity<String> proxyAppointments(HttpServletRequest request,
                                                     @RequestBody(required = false) String body) {
-        return forward(request, body, appointmentsUrl, "/api/appointments");
+        return forward(request, body, appointmentsUrl, "/api");
     }
 
     // ── VACCINES: /api/vaccines/** → vaccines-service ──────────────
+    // Gateway recibe /api/vaccines → envía /vaccines al vaccines-service
     @RequestMapping("/api/vaccines/**")
     public ResponseEntity<String> proxyVaccines(HttpServletRequest request,
                                                 @RequestBody(required = false) String body) {
-        return forward(request, body, vaccinesUrl, "/api/vaccines");
+        return forward(request, body, vaccinesUrl, "/api");
     }
 
     // ── AGENT: /api/agent/** → ai-agent (Lambda) ───────────────────
+    // Gateway recibe /api/agent/chat → envía /agent/chat al Lambda
     @RequestMapping("/api/agent/**")
     public ResponseEntity<String> proxyAgent(HttpServletRequest request,
                                              @RequestBody(required = false) String body) {
-        return forward(request, body, agentUrl, "/api/agent");
+        return forward(request, body, agentUrl, "/api");
     }
 
     // ── Método genérico para reenviar cualquier petición ──────────
@@ -71,7 +76,7 @@ public class ProxyController {
                                            String body,
                                            String serviceUrl,
                                            String prefix) {
-        // Construir la URL destino: quitar /api/xxx del path
+        // Construir la URL destino: quitar /api del path
         String originalPath = request.getRequestURI();
         String targetPath   = originalPath.replace(prefix, "");
         String queryString  = request.getQueryString();
