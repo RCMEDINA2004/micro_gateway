@@ -13,6 +13,7 @@ import java.util.Enumeration;
 @RequiredArgsConstructor
 public class ProxyController {
 
+    // URLs de los microservicios (vienen de application.properties)
     @Value("${services.auth}")
     private String authUrl;
 
@@ -22,71 +23,73 @@ public class ProxyController {
     @Value("${services.appointments}")
     private String appointmentsUrl;
 
-    @Value("${services.agent}")
-    private String agentUrl;
-
     @Value("${services.vaccines}")
     private String vaccinesUrl;
 
+    @Value("${services.agent}")
+    private String agentUrl;
+
     private final WebClient.Builder webClientBuilder;
 
+    // ── AUTH: /api/auth/** → auth-service ──────────────────────────
     @RequestMapping("/api/auth/**")
     public ResponseEntity<String> proxyAuth(HttpServletRequest request,
                                             @RequestBody(required = false) String body) {
-        return forward(request, body, authUrl, "/api");
+        return forward(request, body, authUrl, "/api/auth");
     }
 
+    // ── PETS: /api/pets/** → pets-service ──────────────────────────
     @RequestMapping("/api/pets/**")
     public ResponseEntity<String> proxyPets(HttpServletRequest request,
                                             @RequestBody(required = false) String body) {
-        return forward(request, body, petsUrl, "/api");
+        return forward(request, body, petsUrl, "/api/pets");
     }
 
+    // ── APPOINTMENTS: /api/appointments/** → appointments-service ──
     @RequestMapping("/api/appointments/**")
     public ResponseEntity<String> proxyAppointments(HttpServletRequest request,
                                                     @RequestBody(required = false) String body) {
-        return forward(request, body, appointmentsUrl, "/api");
+        return forward(request, body, appointmentsUrl, "/api/appointments");
     }
 
-    @RequestMapping("/api/agent/**")
-    public ResponseEntity<String> proxyAgent(HttpServletRequest request,
-                                             @RequestBody(required = false) String body) {
-        return forward(request, body, agentUrl, "/api");
-    }
-
+    // ── VACCINES: /api/vaccines/** → vaccines-service ──────────────
     @RequestMapping("/api/vaccines/**")
     public ResponseEntity<String> proxyVaccines(HttpServletRequest request,
                                                 @RequestBody(required = false) String body) {
-        return forward(request, body, vaccinesUrl, "/api");
+        return forward(request, body, vaccinesUrl, "/api/vaccines");
     }
 
+    // ── AGENT: /api/agent/** → ai-agent (Lambda) ───────────────────
+    @RequestMapping("/api/agent/**")
+    public ResponseEntity<String> proxyAgent(HttpServletRequest request,
+                                             @RequestBody(required = false) String body) {
+        return forward(request, body, agentUrl, "/api/agent");
+    }
+
+    // ── Método genérico para reenviar cualquier petición ──────────
     private ResponseEntity<String> forward(HttpServletRequest request,
                                            String body,
                                            String serviceUrl,
                                            String prefix) {
+        // Construir la URL destino: quitar /api/xxx del path
         String originalPath = request.getRequestURI();
         String targetPath   = originalPath.replace(prefix, "");
-        if (targetPath.isEmpty()) targetPath = "/";
         String queryString  = request.getQueryString();
         String targetUrl    = serviceUrl + targetPath + (queryString != null ? "?" + queryString : "");
 
         HttpMethod method = HttpMethod.valueOf(request.getMethod());
 
+        // Copiar headers originales + añadir los del usuario (seteados por JwtFilter)
         HttpHeaders headers = new HttpHeaders();
         Enumeration<String> headerNames = request.getHeaderNames();
         while (headerNames.hasMoreElements()) {
             String name = headerNames.nextElement();
-            String lower = name.toLowerCase();
-            // No copiar headers que causan conflicto al reenviar
-            if (lower.equals("host") || lower.equals("content-length")
-                    || lower.equals("connection") || lower.equals("accept-encoding")) {
-                continue;
-            }
             headers.set(name, request.getHeader(name));
         }
 
-        Object userId    = request.getAttribute("X-User-Id");
-        Object userRole  = request.getAttribute("X-User-Role");
+        // Añadir headers con datos del usuario para que el microservicio los use
+        Object userId = request.getAttribute("X-User-Id");
+        Object userRole = request.getAttribute("X-User-Role");
         Object userEmail = request.getAttribute("X-User-Email");
         if (userId != null)    headers.set("X-User-Id",    userId.toString());
         if (userRole != null)  headers.set("X-User-Role",  userRole.toString());
@@ -94,42 +97,18 @@ public class ProxyController {
 
         headers.setContentType(MediaType.APPLICATION_JSON);
 
+        // Reenviar la petición al microservicio con WebClient (async/reactivo)
         try {
-            WebClient.RequestBodySpec spec = webClientBuilder.build()
+            return webClientBuilder.build()
                     .method(method)
                     .uri(targetUrl)
-                    .headers(h -> h.addAll(headers));
-
-            // Solo poner body si hay contenido
-            WebClient.ResponseSpec response;
-            if (body != null && !body.isEmpty()) {
-                response = spec.bodyValue(body).retrieve();
-            } else {
-                response = spec.retrieve();
-            }
-
-            ResponseEntity<String> microResponse = response
-                    .onStatus(status -> status.isError(), clientResponse ->
-                            clientResponse.bodyToMono(String.class)
-                                    .map(errorBody -> new RuntimeException(errorBody)))
+                    .headers(h -> h.addAll(headers))
+                    .bodyValue(body != null ? body : "")
+                    .retrieve()
                     .toEntity(String.class)
-                    .block();
-
-            // Devolver solo el body y el status, SIN copiar los headers del
-            // microservicio (evita que el header CORS quede duplicado: "*, *")
-            return ResponseEntity
-                    .status(microResponse.getStatusCode())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(microResponse.getBody());
-
+                    .block(); // block() convierte el async en síncrono para simplificar
         } catch (Exception e) {
-            String msg = e.getMessage();
-            if (msg != null && msg.startsWith("{")) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                        .contentType(MediaType.APPLICATION_JSON).body(msg);
-            }
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .contentType(MediaType.APPLICATION_JSON)
                     .body("{\"error\": \"Servicio no disponible: " + serviceUrl + "\"}");
         }
     }
