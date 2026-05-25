@@ -26,7 +26,8 @@ public class JwtFilter extends OncePerRequestFilter {
     private static final List<String> PUBLIC_ROUTES = List.of(
             "/api/auth/register",
             "/api/auth/login",
-            "/api/auth/refresh"
+            "/api/auth/refresh",
+            "/api/agent"
     );
 
     @Override
@@ -34,6 +35,17 @@ public class JwtFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
+
+        // Poner headers CORS en TODAS las respuestas
+        response.setHeader("Access-Control-Allow-Origin", "*");
+        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+        response.setHeader("Access-Control-Allow-Headers", "*");
+
+        // Las peticiones OPTIONS (preflight) se responden de inmediato
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            response.setStatus(HttpServletResponse.SC_OK);
+            return;
+        }
 
         String path = request.getRequestURI();
 
@@ -94,20 +106,30 @@ public class JwtFilter extends OncePerRequestFilter {
         // ADMIN tiene acceso a todo
         if ("ADMIN".equals(role)) return true;
 
-        // VET puede ver mascotas y gestionar citas
+        // VET puede ver mascotas, gestionar citas, registrar vacunas
         if ("VET".equals(role)) {
             if (path.startsWith("/api/pets")) return true;
             if (path.startsWith("/api/appointments")) return true;
+            if (path.startsWith("/api/vaccines")) return true;
+            if (path.startsWith("/api/agent")) return true;
+            if (path.startsWith("/api/auth/users")) return true;
+            if (path.startsWith("/api/auth/me")) return true;
             return false;
         }
 
-        // CLIENT solo puede ver sus propias mascotas y citas
+        // CLIENT solo puede ver sus propias mascotas y citas (sin vacunas)
         if ("CLIENT".equals(role)) {
+            // Mascotas: ver las suyas y crear nuevas
             if (path.startsWith("/api/pets/my")) return true;
-            if (path.equals("/api/pets") && "POST".equals(method)) return true;
+            if (path.startsWith("/api/pets") && "POST".equals(method)) return true;
+            if (path.startsWith("/api/pets") && "GET".equals(method)) return true;
+            // Citas: el CLIENT solo VE las suyas y puede CANCELAR (PATCH status)
             if (path.startsWith("/api/appointments/my")) return true;
-            if (path.equals("/api/appointments") && "POST".equals(method)) return true;
+            if (path.matches("/api/appointments/\\d+/status") && "PATCH".equals(method)) return true;
+            // Otros recursos del cliente
             if (path.startsWith("/api/auth/me")) return true;
+            if (path.startsWith("/api/agent")) return true;
+            // Vacunas: CLIENT NO tiene acceso (solo ADMIN y VET)
             return false;
         }
 

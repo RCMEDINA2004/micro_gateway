@@ -1,35 +1,9 @@
 package com.velkyvet.gateway.config;
 
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.web.filter.CorsFilter;
 
-import java.util.List;
-
+// El manejo de CORS ahora se hace en JwtFilter (headers en todas las respuestas).
+// Esta clase se deja vacia para no romper imports existentes.
 @Configuration
 public class CorsConfig {
-
-    @Bean
-    public CorsFilter corsFilter() {
-        CorsConfiguration config = new CorsConfiguration();
-
-        // Orígenes permitidos (en prod cambiar por el dominio real)
-        config.setAllowedOrigins(List.of("http://localhost:3000", "http://localhost:5173"));
-
-        // Métodos HTTP permitidos
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-
-        // Headers permitidos
-        config.setAllowedHeaders(List.of("*"));
-
-        // Permitir cookies y credenciales
-        config.setAllowCredentials(true);
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config); // aplica a todas las rutas
-
-        return new CorsFilter(source);
-    }
 }
