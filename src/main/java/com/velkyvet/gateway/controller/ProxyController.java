@@ -57,10 +57,37 @@ public class ProxyController {
         return forward(request, body, appointmentsUrl);
     }
 
+    // El AI Agent vive en un AWS API Gateway que solo acepta POST en la raíz /prod/.
+    // No le agregamos la subruta /agent/chat: mandamos el body directo a la raíz.
     @RequestMapping("/api/agent/**")
     public ResponseEntity<String> proxyAgent(HttpServletRequest request,
                                              @RequestBody(required = false) String body) {
-        return forward(request, body, agentUrl);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        HttpEntity<String> httpEntity = new HttpEntity<>(body, headers);
+
+        try {
+            ResponseEntity<String> microResponse = restTemplate.exchange(
+                    agentUrl, HttpMethod.POST, httpEntity, String.class);
+
+            return ResponseEntity
+                    .status(microResponse.getStatusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(microResponse.getBody());
+
+        } catch (RestClientResponseException e) {
+            return ResponseEntity
+                    .status(e.getStatusCode())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(e.getResponseBodyAsString());
+
+        } catch (Exception e) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"error\": \"Servicio de IA no disponible\"}");
+        }
     }
 
     @RequestMapping("/api/vaccines/**")
