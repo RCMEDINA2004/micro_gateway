@@ -5,11 +5,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
-import reactor.core.publisher.Mono;
+import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestTemplate;
 
-import java.time.Duration;
 import java.util.Enumeration;
 import java.util.Set;
 
@@ -32,10 +31,7 @@ public class ProxyController {
     @Value("${services.vaccines}")
     private String vaccinesUrl;
 
-    private final WebClient.Builder webClientBuilder;
-
-    // Timeout para cada llamada a un microservicio (10 segundos)
-    private static final Duration TIMEOUT = Duration.ofSeconds(10);
+    private final RestTemplate restTemplate;
 
     // Headers que nunca se reenvían al microservicio
     private static final Set<String> BLOCKED_HEADERS = Set.of(
@@ -76,15 +72,20 @@ public class ProxyController {
     private ResponseEntity<String> forward(HttpServletRequest request,
                                            String body,
                                            String serviceUrl) {
-        // Construir la URL destino: quitar solo el prefijo "/api" del inicio
+        // Quitar el prefijo "/api" del inicio. Quitar barra final del serviceUrl
+        // para evitar dobles barras (//)
+        String base = serviceUrl.endsWith("/")
+                ? serviceUrl.substring(0, serviceUrl.length() - 1)
+                : serviceUrl;
+
         String originalPath = request.getRequestURI();
         String targetPath = originalPath.startsWith("/api")
-                ? originalPath.substring(4)   // elimina exactamente los 4 chars de "/api"
+                ? originalPath.substring(4)
                 : originalPath;
         if (targetPath.isEmpty()) targetPath = "/";
 
         String queryString = request.getQueryString();
-        String targetUrl = serviceUrl + targetPath
+        String targetUrl = base + targetPath
                 + (queryString != null ? "?" + queryString : "");
 
         HttpMethod method = HttpMethod.valueOf(request.getMethod());
@@ -109,52 +110,37 @@ public class ProxyController {
 
         headers.setContentType(MediaType.APPLICATION_JSON);
 
+        HttpEntity<String> httpEntity = new HttpEntity<>(body, headers);
+
         try {
-            WebClient.RequestBodySpec spec = webClientBuilder.build()
-                    .method(method)
-                    .uri(targetUrl)
-                    .headers(h -> h.addAll(headers));
-
-            WebClient.ResponseSpec responseSpec = (body != null && !body.isEmpty())
-                    ? spec.bodyValue(body).retrieve()
-                    : spec.retrieve();
-
-            // NO convertir errores HTTP en excepciones:
-            // el status 4xx/5xx del microservicio se reenvía tal cual al cliente.
-            // Solo llegará al catch si hay un error de RED (timeout, DNS, etc.)
-            ResponseEntity<String> microResponse = responseSpec
-                    .onStatus(status -> true, clientResponse -> Mono.empty())
-                    .toEntity(String.class)
-                    .timeout(TIMEOUT)
-                    .block();
-
-            if (microResponse == null) {
-                return errorResponse(serviceUrl, "Respuesta vacía del microservicio");
-            }
+            ResponseEntity<String> microResponse = restTemplate.exchange(
+                    targetUrl, method, httpEntity, String.class);
 
             return ResponseEntity
                     .status(microResponse.getStatusCode())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(microResponse.getBody());
 
-        } catch (WebClientResponseException e) {
-            // Error HTTP explícito del microservicio (raro con onStatus anterior, pero por si acaso)
+        } catch (RestClientResponseException e) {
+            // El microservicio respondió con error HTTP (4xx/5xx).
+            // Reenviamos el status y body TAL CUAL al cliente (no lo convertimos en 502)
             return ResponseEntity
                     .status(e.getStatusCode())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(e.getResponseBodyAsString());
 
-        } catch (Exception e) {
-            // Error de red real: timeout, DNS, conexión rechazada
-            return errorResponse(serviceUrl, e.getMessage());
-        }
-    }
+        } catch (ResourceAccessException e) {
+            // Error de RED real: timeout, DNS, conexión rechazada
+            return ResponseEntity
+                    .status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"error\": \"Servicio temporalmente no disponible\"}");
 
-    private ResponseEntity<String> errorResponse(String serviceUrl, String detail) {
-        // No exponer la URL interna del microservicio al cliente
-        return ResponseEntity
-                .status(HttpStatus.BAD_GATEWAY)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body("{\"error\": \"Servicio temporalmente no disponible\"}");
+        } catch (Exception e) {
+            return ResponseEntity
+                    .status(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"error\": \"Error en el gateway\"}");
+        }
     }
 }
