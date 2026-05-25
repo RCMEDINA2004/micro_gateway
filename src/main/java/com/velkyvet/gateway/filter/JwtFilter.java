@@ -27,7 +27,8 @@ public class JwtFilter extends OncePerRequestFilter {
             "/api/auth/register",
             "/api/auth/login",
             "/api/auth/refresh",
-            "/api/agent"
+            "/api/agent",
+            "/health"
     );
 
     @Override
@@ -72,8 +73,7 @@ public class JwtFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Inyectar datos del usuario como headers para los microservicios
-        // Usamos HttpServletRequestWrapper para añadir headers customizados
+        // Inyectar datos del usuario como atributos para el ProxyController
         request.setAttribute("X-User-Id", jwtUtil.extractUserId(token));
         request.setAttribute("X-User-Role", role);
         request.setAttribute("X-User-Email", jwtUtil.extractEmail(token));
@@ -119,17 +119,13 @@ public class JwtFilter extends OncePerRequestFilter {
 
         // CLIENT solo puede ver sus propias mascotas y citas (sin vacunas)
         if ("CLIENT".equals(role)) {
-            // Mascotas: ver las suyas y crear nuevas
             if (path.startsWith("/api/pets/my")) return true;
             if (path.startsWith("/api/pets") && "POST".equals(method)) return true;
             if (path.startsWith("/api/pets") && "GET".equals(method)) return true;
-            // Citas: el CLIENT solo VE las suyas y puede CANCELAR (PATCH status)
             if (path.startsWith("/api/appointments/my")) return true;
             if (path.matches("/api/appointments/\\d+/status") && "PATCH".equals(method)) return true;
-            // Otros recursos del cliente
             if (path.startsWith("/api/auth/me")) return true;
             if (path.startsWith("/api/agent")) return true;
-            // Vacunas: CLIENT NO tiene acceso (solo ADMIN y VET)
             return false;
         }
 
